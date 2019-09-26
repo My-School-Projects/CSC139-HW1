@@ -153,32 +153,10 @@ void Producer(int bufSize, int itemCnt, int randSeed)
 
   for (int i = 0; i < itemCnt; i++)
   {
-    int random = uniform_dist(0, 3000);
+    int random = GetRand(0, 3000);
   }
 
   printf("Producer Completed\n");
-}
-
-/**
- * Generates a random number in the specified range.
- * 
- * The normal method of using modulus to restrict the range of rand() should
- * be avoided, because it does not generate a uniform distribution (some
- * numbers are more likely than others).
- * This alternative approach is to bound the random number between 0 and 1,
- * and then multiply it by the size of the range, which will produce a uniform
- * distribution.
- * Credit to @jxh on StackOverflow for this idea.
- * https://stackoverflow.com/a/11642117/1291990
- * 
- * @param min The minimum value of the range (inclusive)
- * @param max The maximum value of the range (inclusive)
- */
-int uniform_dist(int min, int max)
-{
-  double random = rand()/(1.0 + RAND_MAX);
-  int rangeSize = max - min + 1;
-  return (random * rangeSize) + min;
 }
 
 /**
