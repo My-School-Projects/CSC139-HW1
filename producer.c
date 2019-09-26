@@ -6,7 +6,7 @@
 // CSC 139
 // Fall 2019
 // Section 2
-// Tested on: macOS 10.14.6, CentOS 6.10 (athena)
+// Tested on: CentOS 6.10 (athena)
 //===----------------------------------------------------------------------===//
 
 #include <errno.h>
@@ -47,8 +47,8 @@ void WriteAtBufIndex(int, int);
 int ReadAtBufIndex(int);
 int GetRand(int, int);
 
-// My own functions
 int stoi(const char *);
+int randInRange(int, int, int);
 
 int main(int argc, char *argv[])
 {
@@ -86,18 +86,20 @@ int main(int argc, char *argv[])
   pid_t pid = fork();
 
   if (pid < 0)
-  { /* error occurred */
+  {
     fprintf(stderr, "Fork Failed\n");
     exit(1);
   }
   else if (pid == 0)
-  { /* child process */
+  {
+    // Child process
     printf("Launching Consumer \n");
     execlp("./consumer", "consumer", NULL);
   }
   else
-  { /* parent process */
-    /* parent will wait for the child to complete */
+  {
+    // Parent process
+    // Parent will wait for the child to complete
     printf("Starting Producer\n");
 
     // The function that actually implements the production
@@ -111,50 +113,21 @@ int main(int argc, char *argv[])
   return 0;
 }
 
-/**
- * Serves the same function as atoi(), but performs a number of checks.
- * 
- * 
- */
-int stoi(const char *num)
-{
-  char *end;
-  errno = 0;
-  // Use strtol because atoi does not do any error checking
-  // 10 is for base-10
-  long val = strtol(num, &end, 10);
-  // If there was an error, (if the string is not numeric)
-  if (end == num || *end != '\0'|| errno == ERANGE)
-  {
-    printf("%s is not a number.\n", num);
-    exit(1);
-  }
-  // Check if val is outside of int range
-  if (val < INT_MIN || val > INT_MAX)
-  {
-    printf("%s has too many digits.\n", num);
-    exit(1);
-  }
-  // Casting long to int is now safe
-  return (int) val;
-}
-
 void InitShm(int bufSize, int itemCnt)
 {
   int in = 0;
   int out = 0;
   // Name of shared memory object to be passed to shm_open
-  const char *name = "OS_HW1_yourName";
+  const char *name = "OS_HW1_MichaelDorst";
 
-  // Write code here to create a shared memory block and map it to gShmPtr
-  // Use the above name.
-  // **Extremely Important: map the shared memory block for both reading and
-  // writing
-  // Use PROT_READ | PROT_WRITE
+  gShmPtr = mmap(NULL, (bufSize + 4) * sizeof(int), PROT_READ | PROT_WRITE,
+                 MAP_SHARED | MAP_ANONYMOUS, NULL, 0);
 
-  // Write code here to set the values of the four integers in the header
-  // Just call the functions provided below, like this
+  // Set the values of the four integers in the header
   SetBufSize(bufSize);
+  SetItemCnt(itemCnt);
+  SetIn(in);
+  SetOut(out);
 }
 
 void Producer(int bufSize, int itemCnt, int randSeed)
@@ -178,7 +151,62 @@ void Producer(int bufSize, int itemCnt, int randSeed)
   // where i is the item number, val is the item value, in is its index in the
   // bounded buffer
 
+  for (int i = 0; i < itemCnt; i++)
+  {
+    int random = uniform_dist(0, 3000);
+  }
+
   printf("Producer Completed\n");
+}
+
+/**
+ * Generates a random number in the specified range.
+ * 
+ * The normal method of using modulus to restrict the range of rand() should
+ * be avoided, because it does not generate a uniform distribution (some
+ * numbers are more likely than others).
+ * This alternative approach is to bound the random number between 0 and 1,
+ * and then multiply it by the size of the range, which will produce a uniform
+ * distribution.
+ * Credit to @jxh on StackOverflow for this idea.
+ * https://stackoverflow.com/a/11642117/1291990
+ * 
+ * @param min The minimum value of the range (inclusive)
+ * @param max The maximum value of the range (inclusive)
+ */
+int uniform_dist(int min, int max)
+{
+  double random = rand()/(1.0 + RAND_MAX);
+  int rangeSize = max - min + 1;
+  return (random * rangeSize) + min;
+}
+
+/**
+ * Serves the same function as atoi(), but performs a number of checks.
+ *
+ * Checks that num is a numeric value, and also that it is in the range of `int`
+ */
+int stoi(const char *num)
+{
+  char *end;
+  errno = 0;
+  // Use strtol because atoi does not do any error checking
+  // 10 is for base-10
+  long val = strtol(num, &end, 10);
+  // If there was an error, (if the string is not numeric)
+  if (end == num || *end != '\0' || errno == ERANGE)
+  {
+    printf("%s is not a number.\n", num);
+    exit(1);
+  }
+  // Check if val is outside of int range
+  if (val < INT_MIN || val > INT_MAX)
+  {
+    printf("%s has too many digits.\n", num);
+    exit(1);
+  }
+  // Casting long to int is now safe
+  return (int)val;
 }
 
 // Set the value of shared variable "bufSize"

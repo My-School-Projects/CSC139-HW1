@@ -6,7 +6,7 @@
 // CSC 139
 // Fall 2019
 // Section 2
-// Tested on: macOS 10.14.6, CentOS 6.10 (athena)
+// Tested on: CentOS 6.10 (athena)
 //===----------------------------------------------------------------------===//
 
 #include <fcntl.h>
