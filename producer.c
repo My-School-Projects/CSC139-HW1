@@ -5,13 +5,13 @@
 //===----------------------------------------------------------------------===//
 // CSC 139
 // Fall 2019
-// First Assignment
-// Dorst, Michael
 // Section 2
 // Tested on: macOS 10.14.6, CentOS 6.10 (athena)
 //===----------------------------------------------------------------------===//
 
+#include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,29 +47,43 @@ void WriteAtBufIndex(int, int);
 int ReadAtBufIndex(int);
 int GetRand(int, int);
 
+// My own functions
+int stoi(const char *);
+
 int main(int argc, char *argv[])
 {
-  pid_t pid;
-  int bufSize;  // Bounded buffer size
-  int itemCnt;  // Number of items to be produced
-  int randSeed; // Seed for the random number generator
-
   if (argc != 4)
   {
-    printf("Invalid number of command-line arguments\n");
+    fprintf(stderr, "Invalid number of command-line arguments\n");
     exit(1);
   }
-  bufSize = atoi(argv[1]);
-  itemCnt = atoi(argv[2]);
-  randSeed = atoi(argv[3]);
 
-  // Write code to check the validity of the command-line arguments
+  // Bounded buffer size
+  int bufSize = stoi(argv[1]);
+  // Number of items to be produced
+  int itemCnt = stoi(argv[2]);
+  // Seed for the random number generator
+  int randSeed = stoi(argv[3]);
+
+  // Validate command line arguments
+
+  if (bufSize < 1 || bufSize > 1000)
+  {
+    fprintf(stderr, "Buffer size must be between 1 and 1000\n");
+    exit(1);
+  }
+
+  if (itemCnt < 1)
+  {
+    fprintf(stderr, "Item count must be greater than 0\n");
+    exit(1);
+  }
 
   // Function that creates a shared memory segment and initializes its header
   InitShm(bufSize, itemCnt);
 
-  /* fork a child process */
-  pid = fork();
+  // Fork a child process
+  pid_t pid = fork();
 
   if (pid < 0)
   { /* error occurred */
@@ -97,15 +111,45 @@ int main(int argc, char *argv[])
   return 0;
 }
 
+/**
+ * Serves the same function as atoi(), but performs a number of checks.
+ * 
+ * 
+ */
+int stoi(const char *num)
+{
+  char *end;
+  errno = 0;
+  // Use strtol because atoi does not do any error checking
+  // 10 is for base-10
+  long val = strtol(num, &end, 10);
+  // If there was an error, (if the string is not numeric)
+  if (end == num || *end != '\0'|| errno == ERANGE)
+  {
+    printf("%s is not a number.\n", num);
+    exit(1);
+  }
+  // Check if val is outside of int range
+  if (val < INT_MIN || val > INT_MAX)
+  {
+    printf("%s has too many digits.\n", num);
+    exit(1);
+  }
+  // Casting long to int is now safe
+  return (int) val;
+}
+
 void InitShm(int bufSize, int itemCnt)
 {
   int in = 0;
   int out = 0;
-  const char *name = "OS_HW1_yourName"; // Name of shared memory object to be passed to shm_open
+  // Name of shared memory object to be passed to shm_open
+  const char *name = "OS_HW1_yourName";
 
   // Write code here to create a shared memory block and map it to gShmPtr
   // Use the above name.
-  // **Extremely Important: map the shared memory block for both reading and writing
+  // **Extremely Important: map the shared memory block for both reading and
+  // writing
   // Use PROT_READ | PROT_WRITE
 
   // Write code here to set the values of the four integers in the header
@@ -121,13 +165,18 @@ void Producer(int bufSize, int itemCnt, int randSeed)
   srand(randSeed);
 
   // Write code here to produce itemCnt integer values in the range [0-3000]
-  // Use the functions provided below to get/set the values of shared variables "in" and "out"
-  // Use the provided function WriteAtBufIndex() to write into the bounded buffer
-  // Use the provided function GetRand() to generate a random number in the specified range
-  // **Extremely Important: Remember to set the value of any shared variable you change locally
+  // Use the functions provided below to get/set the values of shared variables
+  // "in" and "out"
+  // Use the provided function WriteAtBufIndex() to write into the bounded
+  // buffer
+  // Use the provided function GetRand() to generate a random number in the
+  // specified range
+  // **Extremely Important: Remember to set the value of any shared variable you
+  // change locally
   // Use the following print statement to report the production of an item:
   // printf("Producing Item %d with value %d at Index %d\n", i, val, in);
-  // where i is the item number, val is the item value, in is its index in the bounded buffer
+  // where i is the item number, val is the item value, in is its index in the
+  // bounded buffer
 
   printf("Producer Completed\n");
 }
