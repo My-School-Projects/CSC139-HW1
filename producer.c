@@ -115,45 +115,57 @@ int main(int argc, char *argv[])
 
 void InitShm(int bufSize, int itemCnt)
 {
-  int in = 0;
-  int out = 0;
   // Name of shared memory object to be passed to shm_open
-  const char *name = "OS_HW1_MichaelDorst";
+  const char *name = "/OS_HW1_MichaelDorst";
 
-  gShmPtr = mmap(NULL, (bufSize + 4) * sizeof(int), PROT_READ | PROT_WRITE,
-                 MAP_SHARED | MAP_ANONYMOUS, NULL, 0);
+  // Create a shared memory segment
+  int shm_fd = shm_open(name, O_CREAT | O_RDWR, 0666);
+  
+  if (shm_fd < 0)
+  {
+    fprintf(stderr, "Producer: Unable to create shared memory segment\n");
+    exit(1);
+  }
+
+  // Set the size of the segment
+  if (ftruncate(shm_fd, SHM_SIZE) == -1)
+  {
+    fprintf(stderr, "Producer: Unable to truncate the memory segment\n");
+    exit(1);
+  }
+
+  // Map the segment to memory
+  gShmPtr = mmap(NULL, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  
+  if (gShmPtr == (void *) -1)
+  {
+    fprintf(stderr, "Producer: Unable to map the shared memory segment\n");
+    exit(1);
+  }
 
   // Set the values of the four integers in the header
   SetBufSize(bufSize);
   SetItemCnt(itemCnt);
-  SetIn(in);
-  SetOut(out);
+  SetIn(0);
+  SetOut(0);
 }
 
 void Producer(int bufSize, int itemCnt, int randSeed)
 {
-  int in = 0;
-  int out = 0;
-
   srand(randSeed);
 
-  // Write code here to produce itemCnt integer values in the range [0-3000]
-  // Use the functions provided below to get/set the values of shared variables
-  // "in" and "out"
-  // Use the provided function WriteAtBufIndex() to write into the bounded
-  // buffer
-  // Use the provided function GetRand() to generate a random number in the
-  // specified range
-  // **Extremely Important: Remember to set the value of any shared variable you
-  // change locally
-  // Use the following print statement to report the production of an item:
-  // printf("Producing Item %d with value %d at Index %d\n", i, val, in);
-  // where i is the item number, val is the item value, in is its index in the
-  // bounded buffer
-
-  for (int i = 0; i < itemCnt; i++)
+  int in = 0;
+  int i;
+  for (i = 0; i < itemCnt; i++)
   {
-    int random = GetRand(0, 3000);
+    // If buffer is full, wait for the consumer to read
+    while (GetOut() == (in + 1) % bufSize);
+
+    int val = GetRand(0, 3000);
+
+    printf("Producing Item %4d with value %4d at Index %4d\n", i, val, in);
+    WriteAtBufIndex(in, val);
+    SetIn(in = (in + 1) % bufSize);
   }
 
   printf("Producer Completed\n");

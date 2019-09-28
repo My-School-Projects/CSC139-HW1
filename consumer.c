@@ -40,32 +40,45 @@ int ReadAtBufIndex(int);
 
 int main()
 {
-  const char *name = "OS_HW1_yourName"; // Name of shared memory block to be passed to shm_open
-  int bufSize;                          // Bounded buffer size
-  int itemCnt;                          // Number of items to be consumed
-  int in;                               // Index of next item to produce
-  int out;                              // Index of next item to consume
+  // Name of shared memory block to be passed to shm_open
+  const char *name = "/OS_HW1_MichaelDorst";
 
-  // Write code here to create a shared memory block and map it to gShmPtr
-  // Use the above name
-  // **Extremely Important: map the shared memory block for both reading and writing
-  // Use PROT_READ | PROT_WRITE
+  // Open the shared memory segment created by the producer
+  int shm_fd = shm_open(name, O_RDWR, 0666);
+  // Check for errors
+  if (shm_fd < 0)
+  {
+    fprintf(stderr, "Consumer: Unable to open shared memory segment\n");
+    exit(1);
+  }
+  // Map the segment to memory
+  gShmPtr = mmap(NULL, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  // Check for errors
+  if (gShmPtr == (void *) -1)
+  {
+    fprintf(stderr, "Consumer: Unable to map the shared memory segment\n");
+    exit(1);
+  }
 
-  // Write code here to read the four integers from the header of the shared memory block
-  // These are: bufSize, itemCnt, in, out
-  // Just call the functions provided below like this:
-  bufSize = GetBufSize();
+  int bufSize = GetBufSize();
+  int itemCnt = GetItemCnt();
+  int out = GetOut();
 
-  // Write code here to check that the consumer has read the right values:
   printf("Consumer reading: bufSize = %d\n", bufSize);
+  printf("Consumer reading: itemCnt = %d\n", itemCnt);
+  printf("Consumer reading: in = %d\n", GetIn());
+  printf("Consumer reading: out = %d\n", out);
 
-  // Write code here to consume all the items produced by the producer
-  // Use the functions provided below to get/set the values of shared variables in, out, bufSize
-  // Use the provided function ReadAtBufIndex() to read from the bounded buffer
-  // **Extremely Important: Remember to set the value of any shared variable you change locally
-  // Use the following print statement to report the consumption of an item:
-  // printf("Consuming Item %d with value %d at Index %d\n", i, val, out);
-  // where i is the item number, val is the item value, out is its index in the bounded buffer
+  int i;
+  for (i = 0; i < itemCnt; i++)
+  {
+    // If buffer is empty, wait for the producer to write
+    while (GetIn() == out);
+
+    int val = ReadAtBufIndex(out);
+    printf("Consuming Item %4d with value %4d at Index %4d\n", i, val, out);
+    SetOut(out = (out + 1) % bufSize);
+  }
 
   // remove the shared memory segment
   if (shm_unlink(name) == -1)
