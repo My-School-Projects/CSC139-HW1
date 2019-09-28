@@ -10,6 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,23 @@
 // Size of shared memory block
 // Pass this to ftruncate and mmap
 #define SHM_SIZE 4096
+// The index of bufferSize in the shared memory header
+#define BUF_SIZE 0
+// The index of itemCnt in the shared memory header
+#define ITEM_CNT 1
+// The index of occupancy in the shared memory header
+// Occupancy is used to track how many items have yet to be consumed.
+#define OCCUPANCY 2
+// Because occupancy will be written to by both processes, it requires a lock
+// to ensure that both do not try to write its value at the same time.
+// Each process must have its own lock, or else the lock would also be written
+// by both processes, which would be just as bad.
+// The index of the producer lock in the shared memory header
+#define PROD_LOCK 3
+// The index of the consumer lock in the shared memory header
+#define CONS_LOCK 4
+// The size of the header
+#define HEADER_SIZE 5
 
 // Global pointer to the shared memory block
 // This should receive the return value of mmap
@@ -27,13 +45,11 @@
 void *gShmPtr;
 
 // You won't necessarily need all the functions below
-void SetIn(int);
-void SetOut(int);
+void SetOccupancy(int);
 void SetHeaderVal(int, int);
 int GetBufSize();
 int GetItemCnt();
-int GetIn();
-int GetOut();
+int GetOccupancy();
 int GetHeaderVal(int);
 void WriteAtBufIndex(int, int);
 int ReadAtBufIndex(int);
@@ -54,7 +70,7 @@ int main()
   // Map the segment to memory
   gShmPtr = mmap(NULL, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
   // Check for errors
-  if (gShmPtr == (void *) -1)
+  if (gShmPtr == (void *)-1)
   {
     fprintf(stderr, "Consumer: Unable to map the shared memory segment\n");
     exit(1);
@@ -62,22 +78,22 @@ int main()
 
   int bufSize = GetBufSize();
   int itemCnt = GetItemCnt();
-  int out = GetOut();
 
   printf("Consumer reading: bufSize = %d\n", bufSize);
   printf("Consumer reading: itemCnt = %d\n", itemCnt);
-  printf("Consumer reading: in = %d\n", GetIn());
-  printf("Consumer reading: out = %d\n", out);
+  printf("Consumer reading: occupancy = %d\n", GetOccupancy());
 
+  int index = 0;
   int i;
   for (i = 0; i < itemCnt; i++)
   {
     // If buffer is empty, wait for the producer to write
-    while (GetIn() == out);
+    while (GetOccupancy() == 0) {}
 
-    int val = ReadAtBufIndex(out);
-    printf("Consuming Item %4d with value %4d at Index %4d\n", i, val, out);
-    SetOut(out = (out + 1) % bufSize);
+    int val = ReadAtBufIndex(index);
+    printf("Consuming Item %4d with value %4d at Index %4d\n", i, val, index);
+    index = (index + 1) % bufSize;
+    SetOccupancy(GetOccupancy() - 1);
   }
 
   // remove the shared memory segment
@@ -90,11 +106,30 @@ int main()
   return 0;
 }
 
-// Set the value of shared variable "in"
-void SetIn(int val) { SetHeaderVal(2, val); }
+// This is a blocking call. It will wait until it can aquire a safe lock.
+// This lock will be used to guard `occupancy`, to prevent corrupting the value.
+void lockResource()
+{
+  // For rationale on this code, see `lockResource()` in `producer.c`
+  while (true)
+  {
+    SetHeaderVal(CONS_LOCK, true);
+    if (GetHeaderVal(PROD_LOCK))
+    {
+      SetHeaderVal(CONS_LOCK, false);
+      while (GetHeaderVal(PROD_LOCK)) {}
+    }
+    else
+    {
+      break;
+    }
+  }
+}
 
-// Set the value of shared variable "out"
-void SetOut(int val) { SetHeaderVal(3, val); }
+void unlockResource() { SetHeaderVal(CONS_LOCK, false); }
+
+// Set the value of shared variable "occupancy"
+void SetOccupancy(int val) { SetHeaderVal(2, val); }
 
 // Set the value of the ith value in the header
 void SetHeaderVal(int i, int val)
@@ -109,11 +144,8 @@ int GetBufSize() { return GetHeaderVal(0); }
 // Get the value of shared variable "itemCnt"
 int GetItemCnt() { return GetHeaderVal(1); }
 
-// Get the value of shared variable "in"
-int GetIn() { return GetHeaderVal(2); }
-
-// Get the value of shared variable "out"
-int GetOut() { return GetHeaderVal(3); }
+// Get the value of shared variable "occupancy"
+int GetOccupancy() { return GetHeaderVal(2); }
 
 // Get the ith value in the header
 int GetHeaderVal(int i)
@@ -128,7 +160,7 @@ int GetHeaderVal(int i)
 void WriteAtBufIndex(int indx, int val)
 {
   // Skip the four-integer header and go to the given index
-  void *ptr = gShmPtr + 4 * sizeof(int) + indx * sizeof(int);
+  void *ptr = gShmPtr + HEADER_SIZE * sizeof(int) + indx * sizeof(int);
   memcpy(ptr, &val, sizeof(int));
 }
 
@@ -138,7 +170,7 @@ int ReadAtBufIndex(int indx)
   int val;
 
   // Skip the four-integer header and go to the given index
-  void *ptr = gShmPtr + 4 * sizeof(int) + indx * sizeof(int);
+  void *ptr = gShmPtr + HEADER_SIZE * sizeof(int) + indx * sizeof(int);
   memcpy(&val, ptr, sizeof(int));
   return val;
 }

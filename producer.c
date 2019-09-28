@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,23 @@
 // Size of shared memory block
 // Pass this to ftruncate and mmap
 #define SHM_SIZE 4096
+// The index of bufferSize in the shared memory header
+#define BUF_SIZE 0
+// The index of itemCnt in the shared memory header
+#define ITEM_CNT 1
+// The index of occupancy in the shared memory header
+// Occupancy is used to track how many items have yet to be consumed.
+#define OCCUPANCY 2
+// Because occupancy will be written to by both processes, it requires a lock
+// to ensure that both do not try to write its value at the same time.
+// Each process must have its own lock, or else the lock would also be written
+// by both processes, which would be just as bad.
+// The index of the producer lock in the shared memory header
+#define PROD_LOCK 3
+// The index of the consumer lock in the shared memory header
+#define CONS_LOCK 4
+// The size of the header
+#define HEADER_SIZE 5
 
 // Global pointer to the shared memory block
 // This should receive the return value of mmap
@@ -35,13 +53,11 @@ void Producer(int, int, int);
 void InitShm(int, int);
 void SetBufSize(int);
 void SetItemCnt(int);
-void SetIn(int);
-void SetOut(int);
+void SetOccupancy(int);
 void SetHeaderVal(int, int);
 int GetBufSize();
 int GetItemCnt();
-int GetIn();
-int GetOut();
+int GetOccupancy();
 int GetHeaderVal(int);
 void WriteAtBufIndex(int, int);
 int ReadAtBufIndex(int);
@@ -120,7 +136,7 @@ void InitShm(int bufSize, int itemCnt)
 
   // Create a shared memory segment
   int shm_fd = shm_open(name, O_CREAT | O_RDWR, 0666);
-  
+
   if (shm_fd < 0)
   {
     fprintf(stderr, "Producer: Unable to create shared memory segment\n");
@@ -136,8 +152,8 @@ void InitShm(int bufSize, int itemCnt)
 
   // Map the segment to memory
   gShmPtr = mmap(NULL, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-  
-  if (gShmPtr == (void *) -1)
+
+  if (gShmPtr == (void *)-1)
   {
     fprintf(stderr, "Producer: Unable to map the shared memory segment\n");
     exit(1);
@@ -146,26 +162,28 @@ void InitShm(int bufSize, int itemCnt)
   // Set the values of the four integers in the header
   SetBufSize(bufSize);
   SetItemCnt(itemCnt);
-  SetIn(0);
-  SetOut(0);
+  SetHeaderVal(PROD_LOCK, false);
+  SetHeaderVal(CONS_LOCK, false);
+  SetOccupancy(0);
 }
 
 void Producer(int bufSize, int itemCnt, int randSeed)
 {
   srand(randSeed);
 
-  int in = 0;
+  int index = 0;
   int i;
   for (i = 0; i < itemCnt; i++)
   {
     // If buffer is full, wait for the consumer to read
-    while (GetOut() == (in + 1) % bufSize);
+    while (GetOccupancy() == bufSize) {}
 
     int val = GetRand(0, 3000);
 
-    printf("Producing Item %4d with value %4d at Index %4d\n", i, val, in);
-    WriteAtBufIndex(in, val);
-    SetIn(in = (in + 1) % bufSize);
+    printf("Producing Item %4d with value %4d at Index %4d\n", i, val, index);
+    WriteAtBufIndex(index, val);
+    index = (index + 1) % bufSize;
+    SetOccupancy(GetOccupancy() + 1);
   }
 
   printf("Producer Completed\n");
@@ -199,17 +217,54 @@ int stoi(const char *num)
   return (int)val;
 }
 
+// This is a blocking call. It will wait until it can aquire a safe lock.
+// This lock will be used to guard `occupancy`, to prevent corrupting the value.
+void lockResource()
+{
+  // This function must block until the producer is locked and the consumer is
+  // unlocked at the exact same time. Therefore the producer must be locked
+  // first, before the consumer is confirmed not to be locked.
+  while (true)
+  {
+    // Attempt to lock producer
+    SetHeaderVal(PROD_LOCK, true);
+    if (GetHeaderVal(CONS_LOCK))
+    {
+      // Attempt failed. Consumer already has a lock.
+      // Avoid deadlock by unlocking producer
+      SetHeaderVal(PROD_LOCK, false);
+      // Wait for consumer to unlock.
+      while (GetHeaderVal(CONS_LOCK)) {}
+      // At this point, consumer is unlocked. However we cannot simply lock the
+      // producer and be done, because by the time we do that, the consumer may
+      // be locked again. Therefore we must repeat this process, locking the
+      // producer, then checking if the consumer is still unlocked. Most of the
+      // time it will be on the second pass, but we have to be sure.
+    }
+    else
+    {
+      // We did it! The producer is locked and the consumer is unlocked.
+      break;
+    }
+  }
+}
+
+void unlockResource() { SetHeaderVal(PROD_LOCK, false); }
+
 // Set the value of shared variable "bufSize"
-void SetBufSize(int val) { SetHeaderVal(0, val); }
+void SetBufSize(int val) { SetHeaderVal(BUF_SIZE, val); }
 
 // Set the value of shared variable "itemCnt"
-void SetItemCnt(int val) { SetHeaderVal(1, val); }
+void SetItemCnt(int val) { SetHeaderVal(ITEM_CNT, val); }
 
-// Set the value of shared variable "in"
-void SetIn(int val) { SetHeaderVal(2, val); }
-
-// Set the value of shared variable "out"
-void SetOut(int val) { SetHeaderVal(3, val); }
+// Set the value of shared variable "occupancy"
+// This is a blocking call, as it will attempt to acquire a lock before writing.
+void SetOccupancy(int val)
+{
+  lockResource();
+  SetHeaderVal(OCCUPANCY, val);
+  unlockResource();
+}
 
 // Set the value of the ith value in the header
 void SetHeaderVal(int i, int val)
@@ -219,16 +274,20 @@ void SetHeaderVal(int i, int val)
 }
 
 // Get the value of shared variable "bufSize"
-int GetBufSize() { return GetHeaderVal(0); }
+int GetBufSize() { return GetHeaderVal(BUF_SIZE); }
 
 // Get the value of shared variable "itemCnt"
-int GetItemCnt() { return GetHeaderVal(1); }
+int GetItemCnt() { return GetHeaderVal(ITEM_CNT); }
 
-// Get the value of shared variable "in"
-int GetIn() { return GetHeaderVal(2); }
-
-// Get the value of shared variable "out"
-int GetOut() { return GetHeaderVal(3); }
+// Get the value of shared variable "occupancy"
+// This is a blocking call, as it will attempt to acquire a lock before reading.
+int GetOccupancy()
+{
+  lockResource();
+  int occupancy = GetHeaderVal(OCCUPANCY);
+  unlockResource();
+  return occupancy;
+}
 
 // Get the ith value in the header
 int GetHeaderVal(int i)
@@ -243,7 +302,7 @@ int GetHeaderVal(int i)
 void WriteAtBufIndex(int indx, int val)
 {
   // Skip the four-integer header and go to the given index
-  void *ptr = gShmPtr + 4 * sizeof(int) + indx * sizeof(int);
+  void *ptr = gShmPtr + HEADER_SIZE * sizeof(int) + indx * sizeof(int);
   memcpy(ptr, &val, sizeof(int));
 }
 
@@ -253,7 +312,7 @@ int ReadAtBufIndex(int indx)
   int val;
 
   // Skip the four-integer header and go to the given index
-  void *ptr = gShmPtr + 4 * sizeof(int) + indx * sizeof(int);
+  void *ptr = gShmPtr + HEADER_SIZE * sizeof(int) + indx * sizeof(int);
   memcpy(&val, ptr, sizeof(int));
   return val;
 }
