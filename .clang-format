@@ -1,3 +1,4 @@
 BreakBeforeBraces: Allman
 ColumnLimit: 80
 IndentWidth: 2
+AllowShortBlocksOnASingleLine: true

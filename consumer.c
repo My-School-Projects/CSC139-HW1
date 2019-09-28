@@ -73,7 +73,7 @@ int main()
   for (i = 0; i < itemCnt; i++)
   {
     // If buffer is empty, wait for the producer to write
-    while (GetIn() == out);
+    while (GetIn() == out) {}
 
     int val = ReadAtBufIndex(out);
     printf("Consuming Item %4d with value %4d at Index %4d\n", i, val, out);

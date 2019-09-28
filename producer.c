@@ -120,7 +120,7 @@ void InitShm(int bufSize, int itemCnt)
 
   // Create a shared memory segment
   int shm_fd = shm_open(name, O_CREAT | O_RDWR, 0666);
-  
+
   if (shm_fd < 0)
   {
     fprintf(stderr, "Producer: Unable to create shared memory segment\n");
@@ -136,8 +136,8 @@ void InitShm(int bufSize, int itemCnt)
 
   // Map the segment to memory
   gShmPtr = mmap(NULL, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-  
-  if (gShmPtr == (void *) -1)
+
+  if (gShmPtr == (void *)-1)
   {
     fprintf(stderr, "Producer: Unable to map the shared memory segment\n");
     exit(1);
@@ -159,7 +159,7 @@ void Producer(int bufSize, int itemCnt, int randSeed)
   for (i = 0; i < itemCnt; i++)
   {
     // If buffer is full, wait for the consumer to read
-    while (GetOut() == (in + 1) % bufSize);
+    while (GetOut() == (in + 1) % bufSize) {}
 
     int val = GetRand(0, 3000);
 
