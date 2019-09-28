@@ -158,14 +158,17 @@ void Producer(int bufSize, int itemCnt, int randSeed)
   int i;
   for (i = 0; i < itemCnt; i++)
   {
-    // If buffer is full, wait for the consumer to read
-    while (GetOut() == (in + 1) % bufSize) {}
-
     int val = GetRand(0, 3000);
 
     printf("Producing Item %4d with value %4d at Index %4d\n", i, val, in);
     WriteAtBufIndex(in, val);
-    SetIn(in = (in + 1) % bufSize);
+    in = (in + 1) % bufSize;
+
+    // If buffer is full, wait for the consumer to read
+    while (GetOut() == in) {}
+    // Wait to call SetIn() until out != in, otherwise the consumer will hang,
+    // thinking that the buffer is empty.
+    SetIn(in);
   }
 
   printf("Producer Completed\n");
